@@ -1,0 +1,5 @@
+# Etapa 1 usa apenas a biblioteca padrao do Python.
+openpyxl>=3.1,<4
+pypdf>=5.0,<7
+selenium>=4.20,<5
+webdriver-manager>=4.0,<5

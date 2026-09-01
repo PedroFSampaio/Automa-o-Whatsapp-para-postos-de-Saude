@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.db
+*.sqlite3
+logs/
+
+# Dados importados e documentos confidenciais
+documentos/
+
+# Artefatos gerados localmente
+build/
+dist/
+
+# Sessao local e segredos
+whatsapp_edge_profile/
+.env
