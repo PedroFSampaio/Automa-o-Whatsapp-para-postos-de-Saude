@@ -20,6 +20,7 @@ class WhatsAppSender:
             from selenium.webdriver.edge.options import Options
             from selenium.webdriver.edge.service import Service
             from selenium.webdriver.common.keys import Keys
+            from selenium.common.exceptions import WebDriverException
             from selenium.webdriver.support import expected_conditions as expected
             from selenium.webdriver.support.ui import WebDriverWait
             from webdriver_manager.microsoft import EdgeChromiumDriverManager
@@ -50,10 +51,12 @@ class WhatsAppSender:
         self._keys = Keys
         self._expected = expected
         self._wait = WebDriverWait
-        options = Options()
+        self._driver = None
         self._profile_path = profile_path or Path.home() / "whatsapp_edge_profile"
         self._profile_path.mkdir(parents=True, exist_ok=True)
         self._attached = bool(debugger_address)
+
+        options = Options()
         if debugger_address:
             # Attach to an Edge instance started with --remote-debugging-port.
             options.add_experimental_option("debuggerAddress", debugger_address)
@@ -61,12 +64,45 @@ class WhatsAppSender:
             options.add_argument(f"--user-data-dir={self._profile_path}")
             options.add_argument("--profile-directory=Default")
             options.add_argument("--start-maximized")
-        self._driver = webdriver.Edge(
-            service=Service(str(resolved_driver_path)),
-            options=options,
-        )
+            options.add_argument("--no-first-run")
+            options.add_argument("--remote-debugging-port=0")
+
+        try:
+            self._driver = webdriver.Edge(
+                service=Service(str(resolved_driver_path)),
+                options=options,
+            )
+        except WebDriverException as first_error:
+            if debugger_address or not self._is_profile_startup_error(first_error):
+                raise RuntimeError(
+                    "Nao foi possivel iniciar o Microsoft Edge. Feche todas as janelas "
+                    "do Edge e tente novamente."
+                ) from first_error
+
+            # A running Edge instance may lock the persistent WhatsApp profile.
+            # Retry with a temporary Selenium profile so sending can continue.
+            fallback_options = Options()
+            fallback_options.add_argument("--start-maximized")
+            fallback_options.add_argument("--no-first-run")
+            fallback_options.add_argument("--remote-debugging-port=0")
+            try:
+                self._driver = webdriver.Edge(
+                    service=Service(str(resolved_driver_path)),
+                    options=fallback_options,
+                )
+            except WebDriverException as fallback_error:
+                raise RuntimeError(
+                    "Nao foi possivel iniciar o Microsoft Edge. Feche as janelas do "
+                    "Edge e do WhatsApp Message Sender e tente novamente."
+                ) from fallback_error
+
         self._driver.set_page_load_timeout(self.CHAT_TIMEOUT)
         self._driver.get(self.WHATSAPP_URL)
+
+    @staticmethod
+    def _is_profile_startup_error(error: Exception) -> bool:
+        details = str(error).lower()
+        return "devtoolsactiveport" in details or "failed to start" in details
 
     def check_connection(self) -> bool:
         try:

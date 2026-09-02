@@ -12,6 +12,7 @@ documentos/
 build/
 dist/
 dist_update/
+dist_fix/
 
 # Sessao local e segredos
 whatsapp_edge_profile/
