@@ -11,6 +11,7 @@ documentos/
 # Artefatos gerados localmente
 build/
 dist/
+dist_update/
 
 # Sessao local e segredos
 whatsapp_edge_profile/

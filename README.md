@@ -6,7 +6,7 @@ Aplicativo Windows para organizar o envio individual de mensagens pelo WhatsApp 
 
 A Etapa 1 entrega a interface principal:
 
-- campo de mensagem com a variavel `{nome}`;
+- editor de mensagem geral com a variavel `[nome]`;
 - selecao de arquivos CSV e XLSX;
 - resumo de contatos, enviados, pendentes e erros;
 - controles Iniciar, Pausar, Continuar e Parar;
@@ -16,7 +16,7 @@ A Etapa 1 entrega a interface principal:
 - suporte a varios telefones para o mesmo paciente;
 - normalizacao automatica dos telefones;
 - visualizacao dos contatos importados.
-- envio individual pelo WhatsApp Web com personalizacao por `{nome}`;
+- envio individual pelo WhatsApp Web com personalizacao por `[nome]`;
 - pausa e parada do envio em segundo plano;
 - atualizacao dos status Enviado e Erro na tabela.
 

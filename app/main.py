@@ -109,16 +109,34 @@ class WhatsAppSenderApp(tk.Tk):
         message_card = ttk.Frame(root, style="Card.TFrame", padding=20)
         message_card.grid(row=2, column=0, sticky="ew", pady=(0, 14))
         message_card.columnconfigure(0, weight=1)
-        ttk.Label(message_card, text="Mensagem", style="Section.TLabel").grid(
+        ttk.Label(message_card, text="Mensagem geral", style="Section.TLabel").grid(
             row=0, column=0, sticky="w"
         )
         ttk.Label(
             message_card,
-            text="Use {nome} para personalizar a mensagem por contato.",
+            text="Use [nome] para inserir automaticamente o nome de cada paciente.",
             background="#ffffff",
             foreground="#65727e",
             font=("Segoe UI", 9),
         ).grid(row=1, column=0, sticky="w", pady=(4, 10))
+
+        self.message_preview = ttk.Label(
+            message_card,
+            text="Mensagem geral pronta para edição.",
+            background="#ffffff",
+            foreground="#17212b",
+            font=("Segoe UI", 10),
+        )
+        self.message_preview.grid(row=2, column=0, sticky="w", pady=(0, 10))
+
+        ttk.Button(
+            message_card,
+            text="Editar mensagem geral",
+            style="Secondary.TButton",
+            command=self._open_general_message_editor,
+        ).grid(row=3, column=0, sticky="w")
+
+        # Hidden storage used by the sending flow and the per-contact editor.
         self.message_text = tk.Text(
             message_card,
             height=5,
@@ -132,8 +150,7 @@ class WhatsAppSenderApp(tk.Tk):
             insertbackground="#1f7a5a",
             font=("Segoe UI", 11),
         )
-        self.message_text.grid(row=2, column=0, sticky="ew")
-        self.message_text.insert("1.0", "Ola, {nome}! Tudo bem?")
+        self.message_text.insert("1.0", "Olá [nome], tudo bem?")
 
         controls = ttk.Frame(root)
         controls.grid(row=3, column=0, sticky="nsew")
@@ -284,6 +301,79 @@ class WhatsAppSenderApp(tk.Tk):
         self.stop_button.grid(row=0, column=2, padx=4)
         self.status_label = ttk.Label(footer, text="Aguardando configuracao", style="Status.TLabel")
         self.status_label.grid(row=0, column=4, sticky="e", padx=(16, 0))
+
+    def _open_general_message_editor(self) -> None:
+        """Open a modal editor for the message sent to every contact."""
+        editor_window = tk.Toplevel(self)
+        editor_window.title("Editar mensagem geral")
+        editor_window.geometry("650x380")
+        editor_window.minsize(520, 300)
+        editor_window.transient(self)
+        editor_window.grab_set()
+        editor_window.configure(bg="#f4f6f8")
+
+        container = ttk.Frame(editor_window, padding=24)
+        container.pack(fill="both", expand=True)
+        ttk.Label(
+            container,
+            text="Editar mensagem geral",
+            style="Section.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            container,
+            text="Use [nome] para personalizar a mensagem para cada paciente.",
+            background="#f4f6f8",
+            foreground="#65727e",
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 12))
+
+        editor = tk.Text(
+            container,
+            height=10,
+            wrap="word",
+            relief="flat",
+            borderwidth=1,
+            padx=12,
+            pady=12,
+            bg="#ffffff",
+            fg="#17212b",
+            insertbackground="#1f7a5a",
+            font=("Segoe UI", 11),
+        )
+        editor.pack(fill="both", expand=True)
+        editor.insert("1.0", self.message_text.get("1.0", "end").strip())
+        editor.focus_set()
+
+        buttons = ttk.Frame(container)
+        buttons.pack(fill="x", pady=(12, 0))
+        ttk.Button(
+            buttons,
+            text="Cancelar",
+            style="Secondary.TButton",
+            command=editor_window.destroy,
+        ).pack(side="right")
+        ttk.Button(
+            buttons,
+            text="Salvar mensagem geral",
+            style="Primary.TButton",
+            command=lambda: self._save_general_message(editor, editor_window),
+        ).pack(side="right", padx=(0, 8))
+
+    def _save_general_message(self, editor: tk.Text, editor_window: tk.Toplevel) -> None:
+        message = editor.get("1.0", "end").strip()
+        if not message:
+            messagebox.showwarning("Mensagem vazia", "Digite uma mensagem antes de salvar.")
+            return
+
+        self.message_text.delete("1.0", "end")
+        self.message_text.insert("1.0", message)
+        self.message_preview.configure(text="Mensagem geral salva e pronta para envio.")
+        editor_window.destroy()
+
+    @staticmethod
+    def _personalize_message(message: str, contact_name: str) -> str:
+        """Replace supported patient-name placeholders."""
+        return message.replace("[nome]", contact_name).replace("{nome}", contact_name)
 
     def _import_contacts(self) -> None:
         selected = filedialog.askopenfilenames(
@@ -516,25 +606,14 @@ class WhatsAppSenderApp(tk.Tk):
                     if self.is_stopped:
                         return
                     
-                    # Check if this is an appointment reminder (from PDF import)
-                    if "data" in contact and "horario" in contact:
-                        personalized = (
-                            f"Olá, {contact['name']}! 😊\n"
-                            f"Somos da equipe da unidade de saúde.\n\n"
-                            f"Estamos passando para lembrar que você tem uma consulta com Clínico Geral agendada para:\n\n"
-                            f"📅 *{contact['data']}*\n"
-                            f"🕐 *{contact['horario']}*\n\n"
-                            f"Se tiver alguma dúvida sobre o seu agendamento, pode falar com a gente por aqui. Pedimos apenas que envie sua mensagem por *escrito*, pois *não conseguimos ouvir áudios nem atender ligações* por este número.\n\n"
-                            f"Caso não consiga comparecer, é só responder CANCELAR para nos avisar.\n\n"
-                            f"Agradecemos pela atenção e esperamos você! 💙"
-                        )
+                    # Priority: custom message > imported message > general message.
+                    if "custom_message" in contact:
+                        msg_to_send = contact["custom_message"]
                     else:
-                        # Priority: custom_message > contact message > global message
-                        if "custom_message" in contact:
-                            msg_to_send = contact["custom_message"]
-                        else:
-                            msg_to_send = contact.get("message", message)
-                        personalized = msg_to_send.replace("{nome}", contact["name"])
+                        msg_to_send = contact.get("message", message)
+                    personalized = self._personalize_message(
+                        msg_to_send, contact["name"]
+                    )
                     
                     
                     try:
