@@ -14,11 +14,26 @@ from app.whatsapp_sender import WhatsAppSender
 class WhatsAppSenderApp(tk.Tk):
     """Main window for the first UI milestone."""
 
+    DEFAULT_APPOINTMENT_MESSAGE = (
+        "Olá, [nome]! 😊\n"
+        "Somos da equipe da unidade de saúde.\n\n"
+        "Estamos passando para lembrar que você tem uma consulta com Clínico Geral "
+        "agendada para:\n\n"
+        "📅 *[data]*\n"
+        "🕐 *[horario]*\n\n"
+        "Se tiver alguma dúvida sobre o seu agendamento, pode falar com a gente por "
+        "aqui. Pedimos apenas que envie sua mensagem por *escrito*, pois *não "
+        "conseguimos ouvir áudios nem atender ligações* por este número.\n\n"
+        "Caso não consiga comparecer, é só responder CANCELAR para nos avisar.\n\n"
+        "Agradecemos pela atenção e esperamos você! 💙"
+    )
+
     def __init__(self) -> None:
         super().__init__()
         self.file_batches: list[dict] = []  # List of {path, name, contacts, status}
         self.is_paused = False
         self.is_stopped = False
+        self.use_edited_general_message = False
         self.sender: WhatsAppSender | None = None
         self._configure_window()
         self._build_styles()
@@ -122,7 +137,7 @@ class WhatsAppSenderApp(tk.Tk):
 
         self.message_preview = ttk.Label(
             message_card,
-            text="Mensagem geral pronta para edição.",
+            text="Modo atual: mensagem padrão de agendamento.",
             background="#ffffff",
             foreground="#17212b",
             font=("Segoe UI", 10),
@@ -135,6 +150,12 @@ class WhatsAppSenderApp(tk.Tk):
             style="Secondary.TButton",
             command=self._open_general_message_editor,
         ).grid(row=3, column=0, sticky="w")
+        ttk.Button(
+            message_card,
+            text="Usar mensagem padrão",
+            style="Secondary.TButton",
+            command=self._restore_default_general_message,
+        ).grid(row=3, column=0, sticky="w", padx=(180, 0))
 
         # Hidden storage used by the sending flow and the per-contact editor.
         self.message_text = tk.Text(
@@ -150,7 +171,7 @@ class WhatsAppSenderApp(tk.Tk):
             insertbackground="#1f7a5a",
             font=("Segoe UI", 11),
         )
-        self.message_text.insert("1.0", "Olá [nome], tudo bem?")
+        self.message_text.insert("1.0", self.DEFAULT_APPOINTMENT_MESSAGE)
 
         controls = ttk.Frame(root)
         controls.grid(row=3, column=0, sticky="nsew")
@@ -365,15 +386,50 @@ class WhatsAppSenderApp(tk.Tk):
             messagebox.showwarning("Mensagem vazia", "Digite uma mensagem antes de salvar.")
             return
 
+        confirmed = messagebox.askyesno(
+            "Confirmar mensagem editada",
+            "Ao confirmar, a mensagem editada substituirá a mensagem padrão e "
+            "será enviada para todos os pacientes. Deseja continuar?",
+            parent=editor_window,
+        )
+        if not confirmed:
+            return
+
         self.message_text.delete("1.0", "end")
         self.message_text.insert("1.0", message)
-        self.message_preview.configure(text="Mensagem geral salva e pronta para envio.")
+        self.use_edited_general_message = True
+        self.message_preview.configure(
+            text="Modo atual: mensagem geral EDITADA será enviada para todos."
+        )
         editor_window.destroy()
+        messagebox.showinfo(
+            "Mensagem editada ativada",
+            "Confirmado: a mensagem a ser enviada será a editada, e não a padrão.",
+            parent=self,
+        )
+
+    def _restore_default_general_message(self) -> None:
+        self.message_text.delete("1.0", "end")
+        self.message_text.insert("1.0", self.DEFAULT_APPOINTMENT_MESSAGE)
+        self.use_edited_general_message = False
+        self.message_preview.configure(
+            text="Modo atual: mensagem padrão de agendamento."
+        )
+        messagebox.showinfo(
+            "Mensagem padrão ativada",
+            "A mensagem padrão voltará a ser enviada aos pacientes.",
+            parent=self,
+        )
 
     @staticmethod
-    def _personalize_message(message: str, contact_name: str) -> str:
-        """Replace supported patient-name placeholders."""
-        return message.replace("[nome]", contact_name).replace("{nome}", contact_name)
+    def _personalize_message(message: str, contact: dict) -> str:
+        """Replace supported patient placeholders."""
+        return (
+            message.replace("[nome]", contact["name"])
+            .replace("{nome}", contact["name"])
+            .replace("[data]", str(contact.get("data", "")))
+            .replace("[horario]", str(contact.get("horario", "")))
+        )
 
     def _import_contacts(self) -> None:
         selected = filedialog.askopenfilenames(
@@ -570,7 +626,7 @@ class WhatsAppSenderApp(tk.Tk):
         self.status_label.configure(text="Abrindo WhatsApp Web...")
         threading.Thread(
             target=self._send_contacts,
-            args=(driver_path, message),
+            args=(driver_path, message, self.use_edited_general_message),
             daemon=True,
         ).start()
 
@@ -582,7 +638,12 @@ class WhatsAppSenderApp(tk.Tk):
         ]
         return next((path for path in candidates if path.exists()), None)
 
-    def _send_contacts(self, driver_path: Path | None, message: str) -> None:
+    def _send_contacts(
+        self,
+        driver_path: Path | None,
+        message: str,
+        use_edited_general_message: bool,
+    ) -> None:
         try:
             self.sender = WhatsAppSender(
                 driver_path,
@@ -606,13 +667,17 @@ class WhatsAppSenderApp(tk.Tk):
                     if self.is_stopped:
                         return
                     
-                    # Priority: custom message > imported message > general message.
-                    if "custom_message" in contact:
+                    if use_edited_general_message:
+                        # An explicitly confirmed general edit overrides every contact.
+                        msg_to_send = message
+                    elif "custom_message" in contact:
                         msg_to_send = contact["custom_message"]
                     else:
-                        msg_to_send = contact.get("message", message)
+                        msg_to_send = contact.get(
+                            "message", self.DEFAULT_APPOINTMENT_MESSAGE
+                        )
                     personalized = self._personalize_message(
-                        msg_to_send, contact["name"]
+                        msg_to_send, contact
                     )
                     
                     
