@@ -38,14 +38,15 @@ class WhatsAppSender:
                 )
             resolved_driver_path = driver_path
         else:
-            try:
-                resolved_driver_path = Path(EdgeChromiumDriverManager().install())
-            except Exception as error:
-                raise RuntimeError(
-                    "Nao foi possivel baixar o Microsoft Edge WebDriver automaticamente. "
-                    "Verifique a conexao com a internet ou instale o msedgedriver.exe "
-                    "manualmente em Downloads\\edgedriver_win64."
-                ) from error
+            resolved_driver_path = self._find_cached_compatible_driver()
+            if resolved_driver_path is None:
+                try:
+                    resolved_driver_path = Path(EdgeChromiumDriverManager().install())
+                except Exception as error:
+                    raise RuntimeError(
+                        "Nao foi possivel obter o Microsoft Edge WebDriver. Verifique "
+                        "a conexao com a internet e as configuracoes de proxy."
+                    ) from error
 
         self._by = By
         self._keys = Keys
@@ -73,7 +74,7 @@ class WhatsAppSender:
                 options=options,
             )
         except WebDriverException as first_error:
-            if debugger_address or not self._is_profile_startup_error(first_error):
+            if debugger_address:
                 raise RuntimeError(
                     "Nao foi possivel iniciar o Microsoft Edge. Feche todas as janelas "
                     "do Edge e tente novamente."
@@ -102,7 +103,61 @@ class WhatsAppSender:
     @staticmethod
     def _is_profile_startup_error(error: Exception) -> bool:
         details = str(error).lower()
-        return "devtoolsactiveport" in details or "failed to start" in details
+        return any(
+            marker in details
+            for marker in (
+                "devtoolsactiveport",
+                "failed to start",
+                "failed to write prefs file",
+            )
+        )
+
+    @staticmethod
+    def _installed_edge_major() -> str | None:
+        try:
+            import winreg
+
+            registry_locations = (
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Edge\BLBeacon"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Edge\BLBeacon"),
+                (
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"SOFTWARE\WOW6432Node\Microsoft\Edge\BLBeacon",
+                ),
+            )
+            for hive, key_path in registry_locations:
+                try:
+                    with winreg.OpenKey(hive, key_path) as key:
+                        version = str(winreg.QueryValueEx(key, "version")[0])
+                        return version.split(".", 1)[0]
+                except OSError:
+                    continue
+        except (ImportError, OSError):
+            pass
+        return None
+
+    @classmethod
+    def _find_cached_compatible_driver(cls) -> Path | None:
+        edge_major = cls._installed_edge_major()
+        if not edge_major:
+            return None
+
+        cache_root = Path.home() / ".wdm" / "drivers" / "edgedriver" / "win64"
+        candidates = [
+            path
+            for path in cache_root.glob(f"{edge_major}.*\\msedgedriver.exe")
+            if path.is_file()
+        ]
+        if not candidates:
+            return None
+
+        def version_key(path: Path) -> tuple[int, ...]:
+            try:
+                return tuple(int(part) for part in path.parent.name.split("."))
+            except ValueError:
+                return (0,)
+
+        return max(candidates, key=version_key)
 
     def check_connection(self) -> bool:
         try:

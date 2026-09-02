@@ -44,6 +44,7 @@ class WhatsAppSenderApp(tk.Tk):
         self.geometry("900x650")
         self.minsize(760, 560)
         self.configure(bg="#f4f6f8")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_styles(self) -> None:
         style = ttk.Style(self)
@@ -616,7 +617,9 @@ class WhatsAppSenderApp(tk.Tk):
             messagebox.showinfo("Digite uma mensagem", "Informe a mensagem antes de iniciar.")
             return
 
-        driver_path = self._find_edgedriver()
+        # Let webdriver-manager select a driver that matches the installed Edge.
+        # A manually downloaded, outdated driver can start Edge and crash at once.
+        driver_path = None
 
         self.start_button.configure(state="disabled")
         self.pause_button.configure(state="normal")
@@ -703,6 +706,12 @@ class WhatsAppSenderApp(tk.Tk):
         except Exception as error:
             self._set_status(self._friendly_error_message(error))
         finally:
+            if self.sender is not None:
+                try:
+                    self.sender.close()
+                except Exception:
+                    pass
+                self.sender = None
             self.after(0, self._finish_sending)
 
     @staticmethod
@@ -758,6 +767,18 @@ class WhatsAppSenderApp(tk.Tk):
         self.is_stopped = True
         self.is_paused = False
         self.status_label.configure(text="Envio parado")
+
+    def _on_close(self) -> None:
+        """Stop the worker and release Edge when the application is closed."""
+        self.is_stopped = True
+        self.is_paused = False
+        if self.sender is not None:
+            try:
+                self.sender.close()
+            except Exception:
+                pass
+            self.sender = None
+        self.destroy()
 
 
 if __name__ == "__main__":

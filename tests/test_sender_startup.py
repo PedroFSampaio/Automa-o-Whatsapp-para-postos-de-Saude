@@ -38,10 +38,35 @@ class SenderStartupTests(unittest.TestCase):
             recovered_driver.get.assert_called_once_with(WhatsAppSender.WHATSAPP_URL)
             sender.close()
 
+    def test_cached_compatible_driver_avoids_network_download(self) -> None:
+        cached_driver = Path("cached") / "msedgedriver.exe"
+        driver = MagicMock()
+
+        with (
+            patch.object(
+                WhatsAppSender,
+                "_find_cached_compatible_driver",
+                return_value=cached_driver,
+            ),
+            patch("webdriver_manager.microsoft.EdgeChromiumDriverManager.install")
+            as download,
+            patch("selenium.webdriver.Edge", return_value=driver),
+        ):
+            sender = WhatsAppSender(driver_path=None)
+
+        download.assert_not_called()
+        driver.get.assert_called_once_with(WhatsAppSender.WHATSAPP_URL)
+        sender.close()
+
     def test_profile_error_detection(self) -> None:
         self.assertTrue(
             WhatsAppSender._is_profile_startup_error(
                 RuntimeError("Microsoft Edge failed to start: crashed")
+            )
+        )
+        self.assertTrue(
+            WhatsAppSender._is_profile_startup_error(
+                RuntimeError("failed to write prefs file")
             )
         )
         self.assertFalse(
@@ -57,6 +82,15 @@ class SenderStartupTests(unittest.TestCase):
 
         self.assertIn("Feche as outras janelas", result)
         self.assertNotIn("Stacktrace", result)
+
+    def test_close_releases_driver(self) -> None:
+        sender = object.__new__(WhatsAppSender)
+        sender._attached = False
+        sender._driver = MagicMock()
+
+        sender.close()
+
+        sender._driver.quit.assert_called_once_with()
 
 
 if __name__ == "__main__":
