@@ -2,6 +2,9 @@ import tkinter as tk
 import threading
 import time
 import os
+import shutil
+import sys
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -26,6 +29,20 @@ class WhatsAppSenderApp(tk.Tk):
         "conseguimos ouvir áudios nem atender ligações* por este número.\n\n"
         "Caso não consiga comparecer, é só responder CANCELAR para nos avisar.\n\n"
         "Agradecemos pela atenção e esperamos você! 💙"
+    )
+    MONTH_NAMES = (
+        "Janeiro",
+        "Fevereiro",
+        "Março",
+        "Abril",
+        "Maio",
+        "Junho",
+        "Julho",
+        "Agosto",
+        "Setembro",
+        "Outubro",
+        "Novembro",
+        "Dezembro",
     )
 
     def __init__(self) -> None:
@@ -700,6 +717,11 @@ class WhatsAppSenderApp(tk.Tk):
                     time.sleep(4)
                 
                 batch["status"] = "Concluído"
+                try:
+                    archived_path = self._archive_batch_file(batch["path"])
+                    batch["archived_path"] = archived_path
+                except OSError as archive_error:
+                    batch["archive_error"] = str(archive_error)
                 self._refresh_batch_list()
             
             self._show_final_report()
@@ -713,6 +735,42 @@ class WhatsAppSenderApp(tk.Tk):
                     pass
                 self.sender = None
             self.after(0, self._finish_sending)
+
+    @classmethod
+    def _archive_batch_file(cls, source_path: Path) -> Path | None:
+        """Archive completed PDF/XLSX batches beside the executable."""
+        source_path = Path(source_path).resolve()
+        folder_by_suffix = {
+            ".pdf": "pdf",
+            ".xlsx": "excel",
+            ".xls": "excel",
+        }
+        document_type = folder_by_suffix.get(source_path.suffix.lower())
+        if document_type is None:
+            return None
+
+        if getattr(sys, "frozen", False):
+            application_dir = Path(sys.executable).resolve().parent
+        else:
+            application_dir = Path(__file__).resolve().parent.parent
+
+        month_name = cls.MONTH_NAMES[datetime.now().month - 1]
+        destination_dir = application_dir / "documentos" / document_type / month_name
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination = destination_dir / source_path.name
+
+        if destination.exists():
+            if source_path.read_bytes() == destination.read_bytes():
+                return destination
+            counter = 2
+            while destination.exists():
+                destination = destination_dir / (
+                    f"{source_path.stem}_{counter}{source_path.suffix}"
+                )
+                counter += 1
+
+        shutil.copy2(source_path, destination)
+        return destination
 
     @staticmethod
     def _friendly_error_message(error: Exception) -> str:
@@ -741,6 +799,10 @@ class WhatsAppSenderApp(tk.Tk):
             report += f"   Total: {len(batch['contacts'])} contatos\n"
             report += f"   ✅ Enviados: {batch['sent']}\n"
             report += f"   ❌ Erros: {batch['errors']}\n\n"
+            if batch.get("archived_path"):
+                report += f"   🗂️ Arquivado em: {batch['archived_path']}\n\n"
+            elif batch.get("archive_error"):
+                report += f"   ⚠️ Falha ao arquivar: {batch['archive_error']}\n\n"
         
         report += "=" * 50 + "\n"
         report += f"TOTAL GERAL\n"

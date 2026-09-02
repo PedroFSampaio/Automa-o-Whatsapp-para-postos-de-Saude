@@ -19,6 +19,8 @@ A Etapa 1 entrega a interface principal:
 - envio individual pelo WhatsApp Web com personalizacao por `[nome]`;
 - pausa e parada do envio em segundo plano;
 - atualizacao dos status Enviado e Erro na tabela.
+- arquivamento de PDFs e planilhas concluídos ao lado do executável, em
+  `dist/documentos/pdf|excel/Mês/`.
 
 O banco SQLite ainda sera implementado em uma etapa seguinte.
 
