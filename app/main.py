@@ -701,9 +701,25 @@ class WhatsAppSenderApp(tk.Tk):
             
             self._show_final_report()
         except Exception as error:
-            self._set_status(str(error))
+            self._set_status(self._friendly_error_message(error))
         finally:
             self.after(0, self._finish_sending)
+
+    @staticmethod
+    def _friendly_error_message(error: Exception) -> str:
+        details = str(error)
+        technical_markers = (
+            "session not created",
+            "devtoolsactiveport",
+            "stacktrace:",
+            "msedgedriver!",
+        )
+        if any(marker in details.lower() for marker in technical_markers):
+            return (
+                "Nao foi possivel iniciar o Microsoft Edge. Feche as outras janelas "
+                "do WhatsApp Message Sender e tente novamente com o executavel atualizado."
+            )
+        return details
 
     def _show_final_report(self) -> None:
         """Show final report of all batches"""

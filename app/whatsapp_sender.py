@@ -65,7 +65,7 @@ class WhatsAppSender:
             options.add_argument("--profile-directory=Default")
             options.add_argument("--start-maximized")
             options.add_argument("--no-first-run")
-            options.add_argument("--remote-debugging-port=0")
+            options.add_argument("--remote-debugging-pipe")
 
         try:
             self._driver = webdriver.Edge(
@@ -84,7 +84,7 @@ class WhatsAppSender:
             fallback_options = Options()
             fallback_options.add_argument("--start-maximized")
             fallback_options.add_argument("--no-first-run")
-            fallback_options.add_argument("--remote-debugging-port=0")
+            fallback_options.add_argument("--remote-debugging-pipe")
             try:
                 self._driver = webdriver.Edge(
                     service=Service(str(resolved_driver_path)),

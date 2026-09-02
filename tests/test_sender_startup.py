@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from selenium.common.exceptions import WebDriverException
 
 from app.whatsapp_sender import WhatsAppSender
+from app.main import WhatsAppSenderApp
 
 
 class SenderStartupTests(unittest.TestCase):
@@ -46,6 +47,16 @@ class SenderStartupTests(unittest.TestCase):
         self.assertFalse(
             WhatsAppSender._is_profile_startup_error(RuntimeError("invalid argument"))
         )
+
+    def test_technical_edge_error_is_hidden_from_interface(self) -> None:
+        technical_error = RuntimeError(
+            "session not created: DevToolsActivePort file doesn't exist\nStacktrace:"
+        )
+
+        result = WhatsAppSenderApp._friendly_error_message(technical_error)
+
+        self.assertIn("Feche as outras janelas", result)
+        self.assertNotIn("Stacktrace", result)
 
 
 if __name__ == "__main__":
