@@ -551,7 +551,7 @@ class WhatsAppSenderApp(tk.Tk):
         
         # Update label with contact info
         self.selected_contact_label.configure(
-            text=f"📱 {contact['name']} - {contact['phone']}"
+            text=f"📱 {contact['name']} - {self._format_phone(contact['phone'])}"
         )
         
         # Load message for this contact
@@ -616,7 +616,15 @@ class WhatsAppSenderApp(tk.Tk):
         
         all_contacts = self._get_all_contacts()
         for contact in all_contacts:
-            self.contact_table.insert("", "end", values=(contact["name"], contact["phone"], contact["status"]))
+            self.contact_table.insert(
+                "",
+                "end",
+                values=(
+                    contact["name"],
+                    self._format_phone(contact["phone"]),
+                    contact["status"],
+                ),
+            )
         
         sent = sum(contact["status"] == "Enviado" for contact in all_contacts)
         errors = sum(contact["status"] == "Erro" for contact in all_contacts)
@@ -705,8 +713,10 @@ class WhatsAppSenderApp(tk.Tk):
                         self.sender.send(contact["phone"], personalized)
                         contact["status"] = "Enviado"
                         batch["sent"] += 1
-                    except Exception:
+                        contact.pop("error", None)
+                    except Exception as send_error:
                         contact["status"] = "Erro"
+                        contact["error"] = self._friendly_error_message(send_error)
                         batch["errors"] += 1
                     
                     self.after(0, self._refresh_contacts)
@@ -790,6 +800,15 @@ class WhatsAppSenderApp(tk.Tk):
 
     def _show_final_report(self) -> None:
         """Show final report of all batches"""
+        report = self._build_final_report()
+        total_sent = sum(batch["sent"] for batch in self.file_batches)
+        total_errors = sum(batch["errors"] for batch in self.file_batches)
+
+        messagebox.showinfo("Envio Concluído", report)
+        self._set_status(f"✅ Envio concluído: {total_sent} enviados, {total_errors} erros")
+
+    def _build_final_report(self) -> str:
+        """Build a report including the identity of every failed contact."""
         total_sent = sum(batch["sent"] for batch in self.file_batches)
         total_errors = sum(batch["errors"] for batch in self.file_batches)
         
@@ -798,7 +817,20 @@ class WhatsAppSenderApp(tk.Tk):
             report += f"📄 {batch['name']}\n"
             report += f"   Total: {len(batch['contacts'])} contatos\n"
             report += f"   ✅ Enviados: {batch['sent']}\n"
-            report += f"   ❌ Erros: {batch['errors']}\n\n"
+            report += f"   ❌ Erros: {batch['errors']}\n"
+            failed_contacts = [
+                contact
+                for contact in batch["contacts"]
+                if contact.get("status") == "Erro"
+            ]
+            if failed_contacts:
+                report += "   Pacientes com erro:\n"
+                for contact in failed_contacts:
+                    report += (
+                        f"      - {contact.get('name') or 'Sem nome'} "
+                        f"({self._format_phone(contact.get('phone', ''))})\n"
+                    )
+            report += "\n"
             if batch.get("archived_path"):
                 report += f"   🗂️ Arquivado em: {batch['archived_path']}\n\n"
             elif batch.get("archive_error"):
@@ -808,9 +840,22 @@ class WhatsAppSenderApp(tk.Tk):
         report += f"TOTAL GERAL\n"
         report += f"✅ Enviados: {total_sent}\n"
         report += f"❌ Erros: {total_errors}\n"
-        
-        messagebox.showinfo("Envio Concluído", report)
-        self._set_status(f"✅ Envio concluído: {total_sent} enviados, {total_errors} erros")
+        if total_errors:
+            failed_names = [
+                contact.get("name") or "Sem nome"
+                for batch in self.file_batches
+                for contact in batch["contacts"]
+                if contact.get("status") == "Erro"
+            ]
+            report += f"👤 Com erro: {', '.join(failed_names)}\n"
+        return report
+
+    @staticmethod
+    def _format_phone(phone: str) -> str:
+        digits = str(phone)
+        if len(digits) == 13 and digits.startswith("55"):
+            return f"+55 ({digits[2:4]}) {digits[4:9]}-{digits[9:]}"
+        return digits
 
     def _set_status(self, text: str) -> None:
         self.after(0, lambda: self.status_label.configure(text=text))

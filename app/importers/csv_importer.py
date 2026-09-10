@@ -4,24 +4,37 @@ from pathlib import Path
 
 
 def normalize_phone(value: object) -> str:
-    return re.sub(r"\D", "", str(value or ""))
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if len(digits) in (12, 14) and digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) in (10, 11):
+        digits = f"55{digits}"
+    return digits
 
 
 def is_valid_mobile(phone: str) -> bool:
     """
-    Valida se é um número de celular (começa com 9) ou telefone fixo (começa com 3).
-    Retorna True apenas para celulares (começa com 9).
-    Números fixos (começam com 3) são ignorados.
-    
+    Valida um celular brasileiro no formato DDI + DDD + numero.
+
     Exemplos:
-    - 14991234567 -> True (celular)
-    - 14934567890 -> False (telefone fixo - pulado)
+    - 5514991234567 -> True (celular)
+    - 551433331234 -> False (telefone fixo)
     """
-    # Remove DDD (primeiros 2 dígitos) e verifica o primeiro dígito do número local
-    if len(phone) >= 3:
-        first_digit_of_number = phone[2]  # Terceiro dígito é o primeiro do número local
-        return first_digit_of_number == "9"  # Aceita apenas se começa com 9
-    return False
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 13 and digits.startswith("55"):
+        national_number = digits[2:]
+    elif len(digits) == 11:
+        national_number = digits
+    else:
+        return False
+
+    ddd = national_number[:2]
+    return ddd.isdigit() and 11 <= int(ddd) <= 99 and national_number[2] == "9"
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
