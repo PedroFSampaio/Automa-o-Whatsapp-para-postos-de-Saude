@@ -5,6 +5,18 @@ from app.main import WhatsAppSenderApp
 
 
 class MessageModeTests(unittest.TestCase):
+    def test_selected_do_not_send_contact_is_skipped(self) -> None:
+        self.assertFalse(WhatsAppSenderApp._should_send_contact({"excluded": True}))
+        self.assertTrue(WhatsAppSenderApp._should_send_contact({"excluded": False}))
+        self.assertTrue(WhatsAppSenderApp._should_send_contact({}))
+
+    def test_accented_time_placeholder_uses_patient_time(self) -> None:
+        result = WhatsAppSenderApp._personalize_message(
+            "Consulta: [data] às [horário] (ou [horario])",
+            {"name": "Mariana", "data": "25/09/2026", "horario": "08:30"},
+        )
+        self.assertEqual("Consulta: 25/09/2026 às 08:30 (ou 08:30)", result)
+
     def test_default_message_uses_pdf_patient_fields(self) -> None:
         contact = {
             "name": "Mariana",

@@ -241,6 +241,14 @@ class WhatsAppSenderApp(tk.Tk):
             style="Secondary.TButton",
             command=self._clear_batches,
         ).pack(side="left")
+        self.contacts_button = ttk.Button(
+            batch_buttons,
+            text="Contatos",
+            style="Secondary.TButton",
+            command=self._open_contacts_selector,
+        )
+        self.contacts_button.pack(side="left", padx=(8, 0))
+        self.contacts_button.pack_forget()
 
         summary_card = ttk.Frame(controls, style="Card.TFrame", padding=20)
         summary_card.grid(row=1, column=0, sticky="nsew", pady=(0, 14))
@@ -447,6 +455,7 @@ class WhatsAppSenderApp(tk.Tk):
             .replace("{nome}", contact["name"])
             .replace("[data]", str(contact.get("data", "")))
             .replace("[horario]", str(contact.get("horario", "")))
+            .replace("[horário]", str(contact.get("horario", "")))
         )
 
     def _import_contacts(self) -> None:
@@ -495,10 +504,85 @@ class WhatsAppSenderApp(tk.Tk):
         
         # Update file label with summary
         if self.file_batches:
+            if not self.contacts_button.winfo_ismapped():
+                self.contacts_button.pack(side="left", padx=(8, 0))
             status_text = f"{len(self.file_batches)} arquivo(s) - {total_contacts} contato(s) total"
             self.status_label.configure(text=status_text, foreground="#176044")
         else:
+            self.contacts_button.pack_forget()
             self.status_label.configure(text="Aguardando configuracao", foreground="#65727e")
+
+    def _open_contacts_selector(self) -> None:
+        """Let the user mark contacts that must not receive a message."""
+        contacts = self._get_all_contacts()
+        if not contacts:
+            messagebox.showinfo("Contatos", "Nenhum contato foi importado.")
+            return
+
+        window = tk.Toplevel(self)
+        window.title("Contatos")
+        window.geometry("650x520")
+        window.minsize(500, 350)
+        window.transient(self)
+        window.grab_set()
+
+        container = ttk.Frame(window, padding=20)
+        container.pack(fill="both", expand=True)
+        ttk.Label(container, text="Contatos importados", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(
+            container,
+            text="Marque 'Não enviar' para excluir o paciente do envio.",
+            foreground="#65727e",
+        ).pack(anchor="w", pady=(4, 12))
+
+        list_frame = ttk.Frame(container)
+        list_frame.pack(fill="both", expand=True)
+        canvas = tk.Canvas(list_frame, highlightthickness=0, bg="#ffffff")
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        rows = ttk.Frame(canvas, style="Card.TFrame")
+        rows.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=rows, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        choices: list[tuple[dict, tk.BooleanVar]] = []
+        for row, contact in enumerate(contacts):
+            excluded = tk.BooleanVar(value=bool(contact.get("excluded")))
+            choices.append((contact, excluded))
+            ttk.Checkbutton(rows, text="Não enviar", variable=excluded).grid(
+                row=row, column=0, sticky="w", padx=(8, 14), pady=5
+            )
+            ttk.Label(rows, text=contact.get("name") or "Sem nome", background="#ffffff").grid(
+                row=row, column=1, sticky="w", padx=(0, 14), pady=5
+            )
+            ttk.Label(
+                rows,
+                text=self._format_phone(contact.get("phone", "")),
+                background="#ffffff",
+                foreground="#65727e",
+            ).grid(row=row, column=2, sticky="w", pady=5)
+
+        def save_choices() -> None:
+            excluded_count = 0
+            for contact, choice in choices:
+                contact["excluded"] = choice.get()
+                if choice.get():
+                    contact["status"] = "Não enviar"
+                    excluded_count += 1
+                elif contact.get("status") == "Não enviar":
+                    contact["status"] = "Pendente"
+            self._refresh_contacts()
+            window.destroy()
+            messagebox.showinfo(
+                "Contatos atualizados",
+                f"{excluded_count} contato(s) não receberão mensagem.",
+                parent=self,
+            )
+
+        ttk.Button(container, text="Confirmar seleção", style="Primary.TButton", command=save_choices).pack(
+            anchor="e", pady=(14, 0)
+        )
 
     def _remove_batch(self) -> None:
         """Remove selected batch from list"""
@@ -628,9 +712,10 @@ class WhatsAppSenderApp(tk.Tk):
         
         sent = sum(contact["status"] == "Enviado" for contact in all_contacts)
         errors = sum(contact["status"] == "Erro" for contact in all_contacts)
+        excluded = sum(bool(contact.get("excluded")) for contact in all_contacts)
         self.metric_values["total"].configure(text=str(len(all_contacts)))
         self.metric_values["sent"].configure(text=str(sent))
-        self.metric_values["pending"].configure(text=str(len(all_contacts) - sent - errors))
+        self.metric_values["pending"].configure(text=str(len(all_contacts) - sent - errors - excluded))
         self.metric_values["errors"].configure(text=str(errors))
 
     def _start(self) -> None:
@@ -641,12 +726,19 @@ class WhatsAppSenderApp(tk.Tk):
         if not message:
             messagebox.showinfo("Digite uma mensagem", "Informe a mensagem antes de iniciar.")
             return
+        if not any(self._should_send_contact(contact) for contact in self._get_all_contacts()):
+            messagebox.showinfo(
+                "Nenhum contato para enviar",
+                "Todos os contatos estão marcados como 'Não enviar'.",
+            )
+            return
 
         # Let webdriver-manager select a driver that matches the installed Edge.
         # A manually downloaded, outdated driver can start Edge and crash at once.
         driver_path = None
 
         self.start_button.configure(state="disabled")
+        self.contacts_button.configure(state="disabled")
         self.pause_button.configure(state="normal")
         self.stop_button.configure(state="normal")
         self.is_stopped = False
@@ -694,6 +786,10 @@ class WhatsAppSenderApp(tk.Tk):
                         time.sleep(0.2)
                     if self.is_stopped:
                         return
+                    if not self._should_send_contact(contact):
+                        contact["status"] = "Não enviar"
+                        self.after(0, self._refresh_contacts)
+                        continue
                     
                     if use_edited_general_message:
                         # An explicitly confirmed general edit overrides every contact.
@@ -818,6 +914,9 @@ class WhatsAppSenderApp(tk.Tk):
             report += f"   Total: {len(batch['contacts'])} contatos\n"
             report += f"   ✅ Enviados: {batch['sent']}\n"
             report += f"   ❌ Erros: {batch['errors']}\n"
+            excluded_contacts = [contact for contact in batch["contacts"] if contact.get("excluded")]
+            if excluded_contacts:
+                report += f"   ⏭️ Não enviados por seleção: {len(excluded_contacts)}\n"
             failed_contacts = [
                 contact
                 for contact in batch["contacts"]
@@ -851,6 +950,10 @@ class WhatsAppSenderApp(tk.Tk):
         return report
 
     @staticmethod
+    def _should_send_contact(contact: dict) -> bool:
+        return not bool(contact.get("excluded"))
+
+    @staticmethod
     def _format_phone(phone: str) -> str:
         digits = str(phone)
         if len(digits) == 13 and digits.startswith("55"):
@@ -862,6 +965,7 @@ class WhatsAppSenderApp(tk.Tk):
 
     def _finish_sending(self) -> None:
         self.start_button.configure(state="normal")
+        self.contacts_button.configure(state="normal")
         self.pause_button.configure(state="disabled", text="Pausar")
         self.stop_button.configure(state="disabled")
 
